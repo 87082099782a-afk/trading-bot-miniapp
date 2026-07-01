@@ -1,6 +1,16 @@
 import { useMemo, useState } from "react";
 import { actionLabel, apiAction } from "./api.js";
-import { ACTIONS, APP_CONFIG, AUTO_TRADING_MODES, CONFIG_ERROR, SAFETY_PAYLOAD, SYMBOLS, THEMES, TIMEFRAMES, TRADING_MODES } from "./config.js";
+import {
+  ACTIONS,
+  APP_CONFIG,
+  AUTO_TRADING_MODES,
+  CONFIG_ERROR,
+  SAFETY_PAYLOAD,
+  SYMBOLS,
+  THEMES,
+  TIMEFRAMES,
+  TRADING_MODES
+} from "./config.js";
 import { initTelegram, notifyHaptic, triggerHaptic } from "./telegram.js";
 
 const screens = [
@@ -43,14 +53,25 @@ const riskRules = [
 ];
 
 const signalQuality = ["trend", "RSI", "MACD", "EMA", "volume", "volatility", "spread", "news risk", "liquidity"];
-const text = (value, fallback = "нет данных от backend") => value === null || value === undefined || value === "" ? fallback : String(value);
+const noBackendData = "нет данных от backend";
+
+const text = (value, fallback = noBackendData) => {
+  if (value === null || value === undefined || value === "") return fallback;
+  if (typeof value === "boolean") return value ? "true" : "false";
+  return String(value);
+};
 
 function Pill({ children, tone = "safe" }) {
   return <span className={`pill ${tone}`}>{children}</span>;
 }
 
 function Card({ title, value, tone = "neutral" }) {
-  return <article className={`card ${tone}`}><span>{title}</span><strong>{text(value)}</strong></article>;
+  return (
+    <article className={`card ${tone}`}>
+      <span>{title}</span>
+      <strong>{text(value)}</strong>
+    </article>
+  );
 }
 
 function SelectField({ label, value, options, onChange }) {
@@ -70,6 +91,7 @@ function SelectField({ label, value, options, onChange }) {
 
 function Result({ result }) {
   if (!result) return null;
+
   return (
     <article className={`result ${result.ok ? "ok" : "bad"}`}>
       <strong>{result.ok ? `n8n: ${actionLabel(result.action)}` : "n8n backend недоступен"}</strong>
@@ -104,13 +126,7 @@ export default function App() {
   const binanceConnected = Boolean(results.status?.data?.binanceConnected || results.diagnostics?.data?.binanceConnected);
   const actionResult = results[actionLabel(screen.action)] || results[screen.action];
 
-  const patchContext = (patch) => setContext((current) => ({ ...current, ...patch }));
-  const selectSymbol = (nextSymbol) => {
-    const next = SYMBOLS.find((item) => item.symbol === nextSymbol) || SYMBOLS[0];
-    patchContext({ selectedSymbol: next.symbol, selectedProvider: next.provider, selectedMarket: next.market });
-  };
-
-  const run = async (action, extra = {}) => {
+  const run = async (action, extra = {}, nextContext = context) => {
     const key = actionLabel(action);
     if (CONFIG_ERROR) {
       const blocked = { ok: false, action, error: CONFIG_ERROR, safety: SAFETY_PAYLOAD };
@@ -120,16 +136,39 @@ export default function App() {
 
     setLoading(action);
     triggerHaptic("light");
-    const result = await apiAction(action, telegram.user, context, extra, APP_CONFIG.requestTimeoutMs);
+    const result = await apiAction(action, telegram.user, nextContext, extra, APP_CONFIG.requestTimeoutMs);
     setResults((current) => ({ ...current, [key]: result, [action]: result }));
     setLoading("");
     notifyHaptic(result.ok ? "success" : "error");
   };
 
+  const updateContext = (patch, action = ACTIONS.saveSettings, extra = {}) => {
+    const nextContext = { ...context, ...patch };
+    setContext(nextContext);
+    run(action, { uiEvent: "settings_update", ...patch, ...extra }, nextContext);
+  };
+
+  const selectSymbol = (nextSymbol) => {
+    const next = SYMBOLS.find((item) => item.symbol === nextSymbol) || SYMBOLS[0];
+    updateContext(
+      { selectedSymbol: next.symbol, selectedProvider: next.provider, selectedMarket: next.market },
+      ACTIONS.getSymbols,
+      { uiEvent: "select_symbol" }
+    );
+  };
+
+  const openScreen = (item) => {
+    setActive(item.id);
+    run(item.action, { uiEvent: "open_screen", screen: item.id });
+  };
+
   return (
     <div className={`app theme-${context.theme.toLowerCase().replaceAll(" ", "-")}`}>
       <header className="top">
-        <div><span className="eyebrow">Telegram Mini App • {telegram.isTelegram ? "Telegram" : "Preview"}</span><h1>{APP_CONFIG.appName}</h1></div>
+        <div>
+          <span className="eyebrow">Telegram Mini App • {telegram.isTelegram ? "Telegram" : "Preview"}</span>
+          <h1>{APP_CONFIG.appName}</h1>
+        </div>
         <Pill tone="gold">Production</Pill>
       </header>
 
@@ -138,41 +177,97 @@ export default function App() {
 
       <main className="main">
         <section className="hero">
-          <div><span>{symbol.label}</span><h2>{context.selectedSymbol}</h2><p>{context.selectedProvider.toUpperCase()} • {context.selectedMarket} • {context.selectedTimeframe}</p></div>
+          <div>
+            <span>{symbol.label}</span>
+            <h2>{context.selectedSymbol}</h2>
+            <p>{context.selectedProvider.toUpperCase()} • {context.selectedMarket} • {context.selectedTimeframe}</p>
+          </div>
           <Pill tone="gold">Real orders blocked</Pill>
         </section>
 
         <section className="panel">
           <h2>{screen.title}</h2>
+
           <div className="selectors">
             <SelectField label="Symbol" value={context.selectedSymbol} options={SYMBOLS} onChange={selectSymbol} />
-            <SelectField label="Timeframe" value={context.selectedTimeframe} options={TIMEFRAMES} onChange={(value) => patchContext({ selectedTimeframe: value })} />
-            <SelectField label="Theme" value={context.theme} options={THEMES} onChange={(value) => patchContext({ theme: value })} />
+            <SelectField label="Timeframe" value={context.selectedTimeframe} options={TIMEFRAMES} onChange={(value) => updateContext({ selectedTimeframe: value })} />
+            <SelectField label="Theme" value={context.theme} options={THEMES} onChange={(value) => updateContext({ theme: value })} />
           </div>
 
-          {active === "modes" && <div className="chips">{TRADING_MODES.map((mode) => <button key={mode} className={context.tradingMode === mode ? "active" : ""} onClick={() => patchContext({ tradingMode: mode })}>{mode}</button>)}</div>}
-          {active === "auto" && <div className="chips">{AUTO_TRADING_MODES.map((mode) => <button key={mode} className={context.autoTradingMode === mode ? "active" : ""} onClick={() => patchContext({ autoTradingMode: mode })}>{mode}</button>)}</div>}
-          {active === "market" && <div className="symbols">{SYMBOLS.map((item) => <button key={item.symbol} className={item.symbol === context.selectedSymbol ? "active" : ""} onClick={() => selectSymbol(item.symbol)}><strong>{item.symbol}</strong><span>{item.market}</span></button>)}</div>}
+          {active === "modes" && (
+            <div className="chips">
+              {TRADING_MODES.map((mode) => (
+                <button key={mode} className={context.tradingMode === mode ? "active" : ""} onClick={() => updateContext({ tradingMode: mode })}>
+                  {mode}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {active === "auto" && (
+            <div className="chips">
+              {AUTO_TRADING_MODES.map((mode) => (
+                <button key={mode} className={context.autoTradingMode === mode ? "active" : ""} onClick={() => updateContext({ autoTradingMode: mode }, ACTIONS.autotuneStatus)}>
+                  {mode}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {active === "market" && (
+            <div className="symbols">
+              {SYMBOLS.map((item) => (
+                <button key={item.symbol} className={item.symbol === context.selectedSymbol ? "active" : ""} onClick={() => selectSymbol(item.symbol)}>
+                  <strong>{item.symbol}</strong>
+                  <span>{item.market}</span>
+                </button>
+              ))}
+            </div>
+          )}
 
           {active === "signals" && (
             <>
               <div className="signal">
-                <div><span>{context.selectedSymbol}</span><h3>{text(latest?.direction || latest?.signal)}</h3><p>{text(latest?.explanation || latest?.reason, "Сигнал не создан. Нужен реальный ответ n8n backend.")}</p></div>
+                <div>
+                  <span>{context.selectedSymbol}</span>
+                  <h3>{text(latest?.direction || latest?.signal)}</h3>
+                  <p>{text(latest?.explanation || latest?.reason, "Сигнал не создан. Нужен реальный ответ n8n backend.")}</p>
+                </div>
                 <Pill tone="gold">{latest?.confidence ? `${latest.confidence}% confidence` : "backend required"}</Pill>
               </div>
-              <div className="scores">{signalQuality.map((name) => <Card key={name} title={`${name} score`} value="нет данных от backend" />)}</div>
+              <div className="scores">{signalQuality.map((name) => <Card key={name} title={`${name} score`} value={noBackendData} />)}</div>
             </>
           )}
 
           {active === "risk" && <div className="grid">{riskRules.map(([key, value]) => <Card key={key} title={key} value={value} />)}</div>}
+
           {active === "profit" && (
             <>
-              <div className="selectors">{Object.keys(calc).map((key) => <label className="field" key={key}><span>{key}</span><input type="number" value={calc[key]} onChange={(event) => setCalc((current) => ({ ...current, [key]: event.target.value }))} /></label>)}</div>
-              <div className="grid"><Card title="Profit result" value="только после ответа n8n" /><Card title="Loss result" value="только после ответа n8n" tone="danger" /><Card title="Drawdown" value="только после ответа n8n" tone="warning" /><Card title="Guarantee" value="нет гарантии прибыли" /></div>
-              <p className="notice">Расчёт является примерным и не является гарантией прибыли. Фронтенд не создаёт фейковую прибыль.</p>
+              <div className="selectors">
+                {Object.keys(calc).map((key) => (
+                  <label className="field" key={key}>
+                    <span>{key}</span>
+                    <input type="number" value={calc[key]} onChange={(event) => setCalc((current) => ({ ...current, [key]: event.target.value }))} />
+                  </label>
+                ))}
+              </div>
+              <div className="grid">
+                <Card title="Profit result" value="только после ответа n8n" />
+                <Card title="Loss result" value="только после ответа n8n" tone="danger" />
+                <Card title="Drawdown" value="только после ответа n8n" tone="warning" />
+                <Card title="Guarantee" value="нет гарантии прибыли" />
+              </div>
+              <p className="notice">Расчёт не является гарантией прибыли. Фронтенд не создаёт фейковую прибыль.</p>
             </>
           )}
-          {active === "real" && <div className="danger-box"><strong>Real Trading заблокирован по умолчанию.</strong><span>Фронтенд только отправляет request/confirm actions в n8n и сам не включает realTrading.</span><input value={confirm} onChange={(event) => setConfirm(event.target.value)} placeholder="CONFIRM REAL MODE" /></div>}
+
+          {active === "real" && (
+            <div className="danger-box">
+              <strong>Real Trading заблокирован по умолчанию.</strong>
+              <span>Frontend only sends request/confirm actions to n8n; it never enables realTrading locally.</span>
+              <input value={confirm} onChange={(event) => setConfirm(event.target.value)} placeholder="CONFIRM REAL MODE" />
+            </div>
+          )}
 
           <div className="grid">
             <Card title="n8n backend" value={backendChecked ? (backendOnline ? "ответ получен" : "n8n backend недоступен") : "не проверен"} tone={backendOnline ? "safe" : "danger"} />
@@ -189,13 +284,24 @@ export default function App() {
             <button disabled={loading === screen.action} onClick={() => run(screen.action, active === "profit" ? calc : {})}>Run {screen.title}</button>
             <button className="warn" disabled={loading === ACTIONS.startPaperTrading} onClick={() => run(ACTIONS.startPaperTrading)}>Start Paper Trading</button>
             <button className="danger" disabled={loading === ACTIONS.emergencyStop} onClick={() => run(ACTIONS.emergencyStop)}>Emergency Stop</button>
-            {active === "real" && <button className="danger" disabled={confirm !== "CONFIRM REAL MODE"} onClick={() => run(ACTIONS.confirmRealMode, { confirmation: confirm })}>Confirm Real Mode Request</button>}
+            {active === "real" && (
+              <button className="danger" disabled={confirm !== "CONFIRM REAL MODE"} onClick={() => run(ACTIONS.confirmRealMode, { confirmation: confirm })}>
+                Confirm Real Mode Request
+              </button>
+            )}
           </div>
+
           <Result result={actionResult || results.startPaperTrading || results.emergencyStop || results.confirmRealMode} />
         </section>
       </main>
 
-      <nav className="nav">{screens.map((item) => <button key={item.id} className={active === item.id ? "active" : ""} onClick={() => setActive(item.id)}>{item.title}</button>)}</nav>
+      <nav className="nav">
+        {screens.map((item) => (
+          <button key={item.id} className={active === item.id ? "active" : ""} onClick={() => openScreen(item)}>
+            {item.title}
+          </button>
+        ))}
+      </nav>
     </div>
   );
 }
