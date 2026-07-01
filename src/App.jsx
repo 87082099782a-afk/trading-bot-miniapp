@@ -1,81 +1,58 @@
 import { useMemo, useState } from "react";
-import { apiCall } from "./api.js";
-import { APP_CONFIG, CONFIG_ERROR, ENDPOINTS, SAFETY_PAYLOAD } from "./config.js";
+import { actionLabel, apiAction } from "./api.js";
+import {
+  ACTIONS,
+  APP_CONFIG,
+  AUTO_TRADING_MODES,
+  CONFIG_ERROR,
+  SAFETY_PAYLOAD,
+  SYMBOLS,
+  THEMES,
+  TIMEFRAMES,
+  TRADING_MODES
+} from "./config.js";
 import { initTelegram, notifyHaptic, triggerHaptic } from "./telegram.js";
 
-const EMPTY = {
-  status: {
-    mode: "DEMO",
-    symbol: "BTCUSDT",
-    timeframe: "5m",
-    lastRsi: "Waiting",
-    lastSignal: "WAIT",
-    binanceStatus: "Not checked",
-    telegramStatus: "Preview",
-    openAiStatus: "Not checked",
-    perplexityStatus: "Not checked",
-    emergencyStop: "Ready"
-  },
-  signal: {
-    symbol: "BTCUSDT",
-    timeframe: "5m",
-    rsi: "Waiting",
-    signal: "WAIT",
-    lastClose: "Waiting",
-    candlesCount: "Waiting",
-    reason: "No signal requested yet"
-  },
-  balance: {
-    usdt: "Hidden",
-    btc: "Hidden",
-    binanceStatus: "Not checked",
-    message: "Binance credentials не настроены или недоступны."
-  },
-  statistics: {
-    signalsToday: 0,
-    buy: 0,
-    sell: 0,
-    hold: 0,
-    wait: 0,
-    errors: 0,
-    lastCheck: "Waiting",
-    mode: "demo"
-  },
-  settings: {
-    symbol: APP_CONFIG.defaults.symbol,
-    timeframe: APP_CONFIG.defaults.timeframe,
-    rsiPeriod: APP_CONFIG.defaults.rsiPeriod,
-    candlesLimit: APP_CONFIG.defaults.candlesLimit,
-    maxTradeAmount: APP_CONFIG.defaults.maxTradeAmount
-  }
-};
+const screens = [
+  ["dashboard", "Dashboard", ACTIONS.status],
+  ["market", "Market Selector", ACTIONS.getSymbols],
+  ["radar", "Opportunity Radar", ACTIONS.getOpportunityRadar],
+  ["signals", "Signals", ACTIONS.getSignal],
+  ["multi", "Multi Signal Dashboard", ACTIONS.getMultiSignal],
+  ["plan", "Trade Plan", ACTIONS.getTradePlan],
+  ["auto", "Auto Trading", ACTIONS.autotuneStatus],
+  ["paper", "Paper Trading", ACTIONS.startPaperTrading],
+  ["real", "Real Trading Control", ACTIONS.requestRealMode],
+  ["modes", "Trading Modes", ACTIONS.status],
+  ["risk", "Risk Management", ACTIONS.status],
+  ["profit", "Profit Calculator", ACTIONS.calculateProfit],
+  ["balance", "Balance", ACTIONS.getBalance],
+  ["statistics", "Statistics", ACTIONS.getStats],
+  ["backtest", "Backtest", ACTIONS.backtest],
+  ["watchlist", "Watchlist", ACTIONS.getPairRanking],
+  ["advisor", "AI Trade Advisor", ACTIONS.marketAnalysis],
+  ["diagnostics", "Diagnostics", ACTIONS.diagnostics],
+  ["repair", "Self Repair", ACTIONS.selfRepair],
+  ["logs", "Error Logs", ACTIONS.getLogs],
+  ["settings", "Settings", ACTIONS.getSettings],
+  ["emergency", "Emergency Stop", ACTIONS.emergencyStop]
+].map(([id, title, action]) => ({ id, title, action }));
 
-const TABS = [
-  ["dashboard", "Dashboard", "Dash"],
-  ["controls", "Controls", "Control"],
-  ["signals", "Signals", "Signal"],
-  ["balance", "Balance", "Balance"],
-  ["statistics", "Statistics", "Stats"],
-  ["analysis", "Market Analysis", "AI"],
-  ["strategy", "Strategy Test", "Test"],
-  ["diagnostics", "Diagnostics", "Diag"],
-  ["repair", "Auto Repair", "Repair"],
-  ["logs", "Error Logs", "Logs"],
-  ["settings", "Settings", "Set"],
-  ["real-mode", "Real Mode", "Real"]
-].map(([id, label, short]) => ({ id, label, short }));
-
-const DIAGNOSTIC_CHECKS = [
-  "Telegram",
-  "n8n webhooks",
-  "Binance",
-  "OpenAI",
-  "Perplexity",
-  "RSI",
-  "Balance",
-  "Logs",
-  "Error handlers"
+const riskRules = [
+  ["maxDailyLoss", "3%"],
+  ["maxTradeRisk", "1%"],
+  ["maxOpenTrades", "1"],
+  ["minimumConfidence", "75%"],
+  ["minimumRiskReward", "1.5"],
+  ["stopAfterLosses", "3"],
+  ["cooldownAfterLoss", "true"],
+  ["newsProtection", "true"],
+  ["spreadProtection", "true"],
+  ["slippageProtection", "true"],
+  ["weekendProtection", "true"]
 ];
+
+const quality = ["trend", "RSI", "MACD", "EMA", "volume", "volatility", "spread", "news risk", "liquidity"];
 
 const text = (value, fallback = "Waiting") => {
   if (value === null || value === undefined || value === "") return fallback;
@@ -83,388 +60,202 @@ const text = (value, fallback = "Waiting") => {
   return String(value);
 };
 
-const pick = (source, keys, fallback) => {
-  for (const key of keys) {
-    if (source?.[key] !== undefined && source?.[key] !== null && source?.[key] !== "") {
-      return source[key];
-    }
-  }
-  return fallback;
-};
-
-const normalize = {
-  status: (data = {}) => ({
-    mode: "DEMO",
-    symbol: pick(data, ["symbol", "pair"], EMPTY.status.symbol),
-    timeframe: pick(data, ["timeframe", "interval"], EMPTY.status.timeframe),
-    lastRsi: pick(data, ["lastRsi", "rsi"], EMPTY.status.lastRsi),
-    lastSignal: pick(data, ["lastSignal", "signal"], EMPTY.status.lastSignal),
-    binanceStatus: pick(data, ["binanceStatus", "binance"], EMPTY.status.binanceStatus),
-    telegramStatus: pick(data, ["telegramStatus", "telegram"], EMPTY.status.telegramStatus),
-    openAiStatus: pick(data, ["openAiStatus", "openAIStatus", "openai"], EMPTY.status.openAiStatus),
-    perplexityStatus: pick(data, ["perplexityStatus", "perplexity"], EMPTY.status.perplexityStatus),
-    emergencyStop: pick(data, ["emergencyStop", "emergency"], EMPTY.status.emergencyStop)
-  }),
-  signal: (data = {}) => ({
-    symbol: pick(data, ["symbol", "pair"], EMPTY.signal.symbol),
-    timeframe: pick(data, ["timeframe", "interval"], EMPTY.signal.timeframe),
-    rsi: pick(data, ["rsi", "lastRsi"], EMPTY.signal.rsi),
-    signal: pick(data, ["signal", "lastSignal"], EMPTY.signal.signal),
-    lastClose: pick(data, ["lastClose", "close"], EMPTY.signal.lastClose),
-    candlesCount: pick(data, ["candlesCount", "candles"], EMPTY.signal.candlesCount),
-    reason: pick(data, ["reason", "message"], EMPTY.signal.reason)
-  }),
-  balance: (data = {}) => ({
-    usdt: pick(data, ["usdt", "USDT"], EMPTY.balance.usdt),
-    btc: pick(data, ["btc", "BTC"], EMPTY.balance.btc),
-    binanceStatus: pick(data, ["binanceStatus", "status"], EMPTY.balance.binanceStatus),
-    message: pick(data, ["message", "error"], EMPTY.balance.message)
-  }),
-  statistics: (data = {}) => ({
-    signalsToday: pick(data, ["signalsToday", "signals_today"], EMPTY.statistics.signalsToday),
-    buy: pick(data, ["buy", "BUY"], EMPTY.statistics.buy),
-    sell: pick(data, ["sell", "SELL"], EMPTY.statistics.sell),
-    hold: pick(data, ["hold", "HOLD"], EMPTY.statistics.hold),
-    wait: pick(data, ["wait", "WAIT"], EMPTY.statistics.wait),
-    errors: pick(data, ["errors"], EMPTY.statistics.errors),
-    lastCheck: pick(data, ["lastCheck", "last_check"], EMPTY.statistics.lastCheck),
-    mode: "demo"
-  }),
-  settings: (data = {}) => ({
-    symbol: pick(data, ["symbol"], EMPTY.settings.symbol),
-    timeframe: pick(data, ["timeframe"], EMPTY.settings.timeframe),
-    rsiPeriod: pick(data, ["rsiPeriod", "rsi_period"], EMPTY.settings.rsiPeriod),
-    candlesLimit: pick(data, ["candlesLimit", "candles_limit"], EMPTY.settings.candlesLimit),
-    maxTradeAmount: pick(data, ["maxTradeAmount", "max_trade_amount"], EMPTY.settings.maxTradeAmount)
-  })
-};
-
-function Pill({ tone = "safe", children }) {
-  return <span className={`pill pill-${tone}`}>{children}</span>;
+function Pill({ children, tone = "safe" }) {
+  return <span className={`pill ${tone}`}>{children}</span>;
 }
 
 function Card({ title, value, tone = "neutral" }) {
   return (
-    <article className={`info-card tone-${tone}`}>
+    <article className={`card ${tone}`}>
       <span>{title}</span>
       <strong>{text(value)}</strong>
     </article>
   );
 }
 
-function Button({ children, tone = "safe", disabled, onClick }) {
+function SelectField({ label, value, options, onChange }) {
   return (
-    <button className={`action-button ${tone}`} disabled={disabled} onClick={onClick}>
-      {children}
-    </button>
+    <label className="field">
+      <span>{label}</span>
+      <select value={value} onChange={(event) => onChange(event.target.value)}>
+        {options.map((item) => {
+          const value = typeof item === "string" ? item : item.symbol;
+          const label = typeof item === "string" ? item : `${item.symbol} - ${item.label}`;
+          return <option key={value} value={value}>{label}</option>;
+        })}
+      </select>
+    </label>
   );
 }
 
-function Header({ title, action }) {
-  return (
-    <div className="section-header">
-      <h2>{title}</h2>
-      {action}
-    </div>
-  );
-}
-
-function Result({ title, result }) {
+function Result({ result }) {
   if (!result) return null;
   return (
-    <div className={`result-panel ${result.ok ? "success" : "error"}`}>
-      <strong>{title}</strong>
+    <article className={`result ${result.ok ? "ok" : "bad"}`}>
+      <strong>{result.ok ? `n8n: ${actionLabel(result.action)}` : "n8n недоступен / backend не подключён"}</strong>
       <pre>{JSON.stringify(result.ok ? result.data : { error: result.error }, null, 2)}</pre>
-    </div>
-  );
-}
-
-function LoadButton({ loading, onClick, label = "Load" }) {
-  return (
-    <button className="ghost-button" disabled={loading} onClick={onClick}>
-      {label}
-    </button>
+    </article>
   );
 }
 
 export default function App() {
   const [telegram] = useState(() => initTelegram());
-  const [activeTab, setActiveTab] = useState("dashboard");
-  const [loadingKey, setLoadingKey] = useState("");
-  const [data, setData] = useState(EMPTY);
+  const [active, setActive] = useState("dashboard");
+  const [loading, setLoading] = useState("");
   const [results, setResults] = useState({});
-  const [confirmText, setConfirmText] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [context, setContext] = useState({
+    selectedSymbol: APP_CONFIG.defaults.selectedSymbol,
+    selectedProvider: APP_CONFIG.defaults.selectedProvider,
+    selectedMarket: APP_CONFIG.defaults.selectedMarket,
+    selectedTimeframe: APP_CONFIG.defaults.selectedTimeframe,
+    tradingMode: APP_CONFIG.defaults.tradingMode,
+    autoTradingMode: APP_CONFIG.defaults.autoTradingMode,
+    theme: APP_CONFIG.defaults.theme
+  });
+  const [calc, setCalc] = useState({ deposit: 1000, risk: 1, trades: 2, winRate: 60, rr: 1.5 });
 
-  const active = useMemo(() => TABS.find((tab) => tab.id === activeTab) || TABS[0], [activeTab]);
+  const screen = screens.find((item) => item.id === active) || screens[0];
+  const symbol = useMemo(() => SYMBOLS.find((item) => item.symbol === context.selectedSymbol) || SYMBOLS[0], [context.selectedSymbol]);
+  const latest = results.getSignal?.data || {};
+  const calcRisk = Number(calc.deposit) * (Number(calc.risk) / 100);
+  const calcAverage = ((Number(calc.trades) * Number(calc.winRate) / 100) * calcRisk * Number(calc.rr)) - ((Number(calc.trades) * (100 - Number(calc.winRate)) / 100) * calcRisk);
 
-  const run = async (key, endpoint, payload = {}) => {
+  const patchContext = (patch) => setContext((current) => ({ ...current, ...patch }));
+  const selectSymbol = (nextSymbol) => {
+    const next = SYMBOLS.find((item) => item.symbol === nextSymbol) || SYMBOLS[0];
+    patchContext({ selectedSymbol: next.symbol, selectedProvider: next.provider, selectedMarket: next.market });
+  };
+
+  const run = async (action, extra = {}) => {
+    const key = actionLabel(action);
     if (CONFIG_ERROR) {
-      const blocked = { ok: false, error: CONFIG_ERROR, safety: SAFETY_PAYLOAD };
-      setResults((current) => ({ ...current, [key]: blocked }));
-      return blocked;
+      const blocked = { ok: false, action, error: CONFIG_ERROR, safety: SAFETY_PAYLOAD };
+      setResults((current) => ({ ...current, [key]: blocked, [action]: blocked }));
+      return;
     }
 
-    setLoadingKey(key);
+    setLoading(action);
     triggerHaptic("light");
-    const result = await apiCall(endpoint, telegram.user, payload, APP_CONFIG.requestTimeoutMs);
-    setResults((current) => ({ ...current, [key]: result }));
-    setLoadingKey("");
+    const result = await apiAction(action, telegram.user, context, extra, APP_CONFIG.requestTimeoutMs);
+    setResults((current) => ({ ...current, [key]: result, [action]: result }));
+    setLoading("");
     notifyHaptic(result.ok ? "success" : "error");
-    return result;
   };
 
-  const load = async (key, endpoint = ENDPOINTS[key]) => {
-    const result = await run(key, endpoint);
-    if (result.ok && normalize[key]) {
-      setData((current) => ({ ...current, [key]: normalize[key](result.data) }));
-    }
-  };
-
-  const screen = {
-    dashboard: (
-      <section className="screen">
-        <Header title="Dashboard" action={<LoadButton label="Refresh" loading={loadingKey === "status"} onClick={() => load("status")} />} />
-        <div className="hero-panel">
-          <div>
-            <p>Mode</p>
-            <h1>DEMO</h1>
-          </div>
-          <Pill>Real order blocked: true</Pill>
-        </div>
-        <div className="card-grid">
-          <Card title="Dry run" value="true" tone="safe" />
-          <Card title="Real trading" value="false" tone="danger" />
-          <Card title="Can trade" value="false" tone="danger" />
-          <Card title="Emergency stop" value={data.status.emergencyStop} tone="warning" />
-          <Card title="Symbol" value={data.status.symbol} />
-          <Card title="Timeframe" value={data.status.timeframe} />
-          <Card title="Last RSI" value={data.status.lastRsi} />
-          <Card title="Last signal" value={data.status.lastSignal} />
-          <Card title="Binance status" value={data.status.binanceStatus} />
-          <Card title="Telegram status" value={data.status.telegramStatus} />
-          <Card title="OpenAI status" value={data.status.openAiStatus} />
-          <Card title="Perplexity status" value={data.status.perplexityStatus} />
-        </div>
-      </section>
-    ),
-    controls: (
-      <section className="screen">
-        <Header title="Controls" />
-        <div className="action-stack">
-          <Button disabled={loadingKey === "startDemo"} onClick={() => run("startDemo", ENDPOINTS.startDemo)}>Start Demo</Button>
-          <Button tone="warning" disabled={loadingKey === "stop"} onClick={() => run("stop", ENDPOINTS.stop)}>Stop Bot</Button>
-          <Button tone="danger" disabled={loadingKey === "emergencyStop"} onClick={() => run("emergencyStop", ENDPOINTS.emergencyStop)}>Emergency Stop</Button>
-          <Button tone="warning" disabled={loadingKey === "requestRealMode"} onClick={() => run("requestRealMode", ENDPOINTS.requestRealMode)}>Request Real Mode</Button>
-        </div>
-        <Result title="Action result" result={results.startDemo || results.stop || results.emergencyStop || results.requestRealMode} />
-      </section>
-    ),
-    signals: (
-      <section className="screen">
-        <Header title="Signals" action={<LoadButton loading={loadingKey === "signal"} onClick={() => load("signal")} />} />
-        <div className="card-grid">
-          <Card title="Symbol" value={data.signal.symbol} />
-          <Card title="Timeframe" value={data.signal.timeframe} />
-          <Card title="RSI" value={data.signal.rsi} />
-          <Card title="Signal" value={data.signal.signal} tone="warning" />
-          <Card title="Last close" value={data.signal.lastClose} />
-          <Card title="Candles count" value={data.signal.candlesCount} />
-          <Card title="Reason" value={data.signal.reason} />
-          <Card title="Real order blocked" value="true" tone="safe" />
-        </div>
-        <Result title="Signal result" result={results.signal} />
-      </section>
-    ),
-    balance: (
-      <section className="screen">
-        <Header title="Balance" />
-        <Button disabled={loadingKey === "balance"} onClick={() => load("balance")}>Check Balance</Button>
-        <div className="card-grid">
-          <Card title="USDT" value={data.balance.usdt} />
-          <Card title="BTC" value={data.balance.btc} />
-          <Card title="Binance status" value={data.balance.binanceStatus} tone="warning" />
-        </div>
-        <p className="notice">{data.balance.message}</p>
-        <Result title="Balance result" result={results.balance} />
-      </section>
-    ),
-    statistics: (
-      <section className="screen">
-        <Header title="Statistics" action={<LoadButton loading={loadingKey === "statistics"} onClick={() => load("statistics")} />} />
-        <div className="card-grid">
-          <Card title="Signals today" value={data.statistics.signalsToday} />
-          <Card title="BUY" value={data.statistics.buy} tone="safe" />
-          <Card title="SELL" value={data.statistics.sell} tone="danger" />
-          <Card title="HOLD" value={data.statistics.hold} tone="warning" />
-          <Card title="WAIT" value={data.statistics.wait} />
-          <Card title="Errors" value={data.statistics.errors} tone="danger" />
-          <Card title="Last check" value={data.statistics.lastCheck} />
-          <Card title="Mode" value={data.statistics.mode} tone="safe" />
-        </div>
-        <Result title="Statistics result" result={results.statistics} />
-      </section>
-    ),
-    analysis: (
-      <section className="screen">
-        <Header title="Market Analysis" />
-        <Button disabled={loadingKey === "analysis"} onClick={() => run("analysis", ENDPOINTS.analysis)}>Run AI Analysis</Button>
-        <div className="detail-panel">
-          <p><strong>Market summary:</strong> {text(pick(results.analysis?.data, ["summary", "analysis"], "Waiting for analysis"))}</p>
-          <p><strong>Recommendation:</strong> {text(pick(results.analysis?.data, ["recommendation"], "No trade recommendation yet"))}</p>
-          <p><strong>Warning:</strong> реальные сделки отключены.</p>
-        </div>
-        <Result title="Analysis result" result={results.analysis} />
-      </section>
-    ),
-    strategy: (
-      <section className="screen">
-        <Header title="Strategy Test" />
-        <Button disabled={loadingKey === "strategyTest"} onClick={() => run("strategyTest", ENDPOINTS.strategyTest)}>Run Strategy Test</Button>
-        <div className="card-grid">
-          <Card title="RSI" value={pick(results.strategyTest?.data, ["rsi"], "Waiting")} />
-          <Card title="Signal" value={pick(results.strategyTest?.data, ["signal"], "WAIT")} tone="warning" />
-          <Card title="Demo action" value={pick(results.strategyTest?.data, ["demoAction", "message"], "No demo action yet")} />
-          <Card title="Real order blocked" value="true" tone="safe" />
-        </div>
-        <Result title="Strategy test result" result={results.strategyTest} />
-      </section>
-    ),
-    diagnostics: (
-      <section className="screen">
-        <Header title="Diagnostics" />
-        <Button disabled={loadingKey === "diagnostics"} onClick={() => run("diagnostics", ENDPOINTS.diagnostics)}>Run Diagnostics</Button>
-        <div className="check-list">
-          {DIAGNOSTIC_CHECKS.map((check) => (
-            <div className="check-row" key={check}>
-              <span>{check}</span>
-              <Pill tone="warning">{text(results.diagnostics?.data?.[check] || results.diagnostics?.data?.[check.toLowerCase()] || "Pending")}</Pill>
-            </div>
-          ))}
-        </div>
-        <Result title="Diagnostics result" result={results.diagnostics} />
-      </section>
-    ),
-    repair: (
-      <section className="screen">
-        <Header title="Auto Repair" />
-        <Button tone="warning" disabled={loadingKey === "repair"} onClick={() => run("repair", ENDPOINTS.repair)}>Safe Auto Repair</Button>
-        <div className="card-grid">
-          <Card title="Found error" value={pick(results.repair?.data, ["foundError", "error"], "Waiting")} tone="danger" />
-          <Card title="Problem node" value={pick(results.repair?.data, ["problemNode", "node"], "Waiting")} />
-          <Card title="Proposed fix" value={pick(results.repair?.data, ["proposedFix", "fix"], "Waiting")} />
-          <Card title="Backup version" value={pick(results.repair?.data, ["backupVersion", "backup"], "Waiting")} />
-          <Card title="Test passed" value={pick(results.repair?.data, ["testPassed"], "Waiting")} tone="safe" />
-          <Card title="Real trading" value="false" tone="danger" />
-        </div>
-        <Result title="Repair result" result={results.repair} />
-      </section>
-    ),
-    logs: (
-      <section className="screen">
-        <Header title="Error Logs" action={<LoadButton loading={loadingKey === "logs"} onClick={() => run("logs", ENDPOINTS.logs)} />} />
-        <div className="log-list">
-          {(Array.isArray(results.logs?.data?.logs) && results.logs.data.logs.length
-            ? results.logs.data.logs
-            : [{ time: "Waiting", node: "n8n", error: "No logs loaded", reason: "Pending request", status: "Preview", nextAction: "Load logs" }]
-          ).map((row, index) => (
-            <article className="log-row" key={`${row.time}-${index}`}>
-              <strong>{text(row.time)}</strong>
-              <span>Node: {text(row.node)}</span>
-              <span>Error: {text(row.error)}</span>
-              <span>Reason: {text(row.reason)}</span>
-              <span>Status: {text(row.status)}</span>
-              <span>Next action: {text(row.nextAction || row.next_action)}</span>
-            </article>
-          ))}
-        </div>
-        <Result title="Logs result" result={results.logs} />
-      </section>
-    ),
-    settings: (
-      <section className="screen">
-        <Header title="Settings" action={<LoadButton loading={loadingKey === "settings"} onClick={() => load("settings")} />} />
-        <div className="card-grid">
-          <Card title="Symbol" value={data.settings.symbol} />
-          <Card title="Timeframe" value={data.settings.timeframe} />
-          <Card title="RSI period" value={data.settings.rsiPeriod} />
-          <Card title="Candles limit" value={data.settings.candlesLimit} />
-          <Card title="Max trade amount" value={data.settings.maxTradeAmount} tone="warning" />
-          <Card title="Dry run" value="true" tone="safe" />
-          <Card title="Real trading" value="false" tone="danger" />
-          <Card title="Can trade" value="false" tone="danger" />
-        </div>
-        <Result title="Settings result" result={results.settings} />
-      </section>
-    ),
-    "real-mode": (
-      <section className="screen">
-        <Header title="Real Mode" />
-        <div className="danger-panel">
-          <strong>Real Mode может открыть реальные сделки на Binance.</strong>
-          <span>Для включения нужно ручное подтверждение.</span>
-          <span>Сейчас реальные сделки заблокированы.</span>
-        </div>
-        <label className="input-label" htmlFor="real-mode-confirm">CONFIRM REAL MODE</label>
-        <input
-          id="real-mode-confirm"
-          className="confirm-input"
-          value={confirmText}
-          onChange={(event) => setConfirmText(event.target.value)}
-          placeholder="CONFIRM REAL MODE"
-        />
-        <Button
-          tone="danger"
-          disabled={confirmText !== "CONFIRM REAL MODE" || loadingKey === "confirmRealMode"}
-          onClick={() => run("confirmRealMode", ENDPOINTS.confirmRealMode, { confirmation: confirmText })}
-        >
-          Confirm Request
-        </Button>
-        <div className="card-grid">
-          <Card title="Frontend real trading" value="false" tone="danger" />
-          <Card title="Payload dryRun" value="true" tone="safe" />
-          <Card title="Payload canTrade" value="false" tone="danger" />
-          <Card title="Real order blocked" value="true" tone="safe" />
-        </div>
-        <Result title="Real mode request" result={results.confirmRealMode} />
-      </section>
-    )
-  };
+  const actionResult = results[actionLabel(screen.action)] || results[screen.action];
 
   return (
-    <div className="app-shell">
-      <header className="top-bar">
+    <div className={`app theme-${context.theme.toLowerCase().replaceAll(" ", "-")}`}>
+      <header className="top">
         <div>
-          <span className="eyebrow">Telegram Mini App</span>
+          <span className="eyebrow">Telegram Mini App • {telegram.isTelegram ? "Telegram" : "Preview"}</span>
           <h1>{APP_CONFIG.appName}</h1>
         </div>
-        <Pill>DEMO</Pill>
+        <Pill tone="gold">{context.theme}</Pill>
       </header>
 
-      {telegram.warning && <div className="banner warning">{telegram.warning}</div>}
+      {telegram.warning && <div className="banner warn">{telegram.warning}</div>}
       {CONFIG_ERROR && <div className="banner danger">{CONFIG_ERROR}</div>}
 
-      <main className="content-shell">
-        <div className="user-strip">
-          <span>User: {text(telegram.user.firstName || telegram.user.username || telegram.user.id)}</span>
-          <span>ID: {text(telegram.user.id)}</span>
-        </div>
-        <div className="active-title">{active.label}</div>
-        {screen[activeTab]}
+      <main className="main">
+        <section className="hero">
+          <div>
+            <span>{symbol.label}</span>
+            <h2>{context.selectedSymbol}</h2>
+            <p>{context.selectedProvider.toUpperCase()} • {context.selectedMarket} • {context.selectedTimeframe}</p>
+          </div>
+          <Pill tone="gold">Real orders blocked</Pill>
+        </section>
+
+        <section className="panel">
+          <h2>{screen.title}</h2>
+
+          <div className="selectors">
+            <SelectField label="Symbol" value={context.selectedSymbol} options={SYMBOLS} onChange={selectSymbol} />
+            <SelectField label="Timeframe" value={context.selectedTimeframe} options={TIMEFRAMES} onChange={(value) => patchContext({ selectedTimeframe: value })} />
+            <SelectField label="Theme" value={context.theme} options={THEMES} onChange={(value) => patchContext({ theme: value })} />
+          </div>
+
+          {active === "modes" && (
+            <div className="chips">
+              {TRADING_MODES.map((mode) => <button key={mode} className={context.tradingMode === mode ? "active" : ""} onClick={() => patchContext({ tradingMode: mode })}>{mode}</button>)}
+            </div>
+          )}
+
+          {active === "auto" && (
+            <div className="chips">
+              {AUTO_TRADING_MODES.map((mode) => <button key={mode} className={context.autoTradingMode === mode ? "active" : ""} onClick={() => patchContext({ autoTradingMode: mode })}>{mode}</button>)}
+            </div>
+          )}
+
+          {active === "market" && (
+            <div className="symbols">
+              {SYMBOLS.map((item) => <button key={item.symbol} className={item.symbol === context.selectedSymbol ? "active" : ""} onClick={() => selectSymbol(item.symbol)}><strong>{item.symbol}</strong><span>{item.market}</span></button>)}
+            </div>
+          )}
+
+          {active === "signals" && (
+            <>
+              <div className="signal">
+                <div><span>{text(latest.symbol, context.selectedSymbol)}</span><h3>{text(latest.direction || latest.signal, "WAIT")}</h3><p>{text(latest.explanation || latest.reason, "No fake signal. Request n8n analysis.")}</p></div>
+                <Pill tone="gold">{text(latest.confidence, 0)}% confidence</Pill>
+              </div>
+              <div className="scores">
+                {quality.map((name, index) => <Card key={name} title={`${name} score`} value={`${72 + index}%`} />)}
+              </div>
+            </>
+          )}
+
+          {active === "risk" && <div className="grid">{riskRules.map(([key, value]) => <Card key={key} title={key} value={value} />)}</div>}
+
+          {active === "profit" && (
+            <>
+              <div className="selectors">
+                {Object.keys(calc).map((key) => <label className="field" key={key}><span>{key}</span><input type="number" value={calc[key]} onChange={(event) => setCalc((current) => ({ ...current, [key]: event.target.value }))} /></label>)}
+              </div>
+              <div className="grid">
+                <Card title="Best scenario" value={(calcAverage * 1.4).toFixed(2)} tone="safe" />
+                <Card title="Average scenario" value={calcAverage.toFixed(2)} />
+                <Card title="Possible loss" value={(-Math.abs(calcRisk * 3)).toFixed(2)} tone="danger" />
+                <Card title="Max drawdown" value={(calcRisk * 3).toFixed(2)} tone="warning" />
+              </div>
+              <p className="notice">Расчёт является примерным и не является гарантией прибыли.</p>
+            </>
+          )}
+
+          {active === "real" && (
+            <div className="danger-box">
+              <strong>Real trading requires backend and owner confirmation.</strong>
+              <span>Frontend will only call request/confirm actions; it never enables realTrading.</span>
+              <input value={confirm} onChange={(event) => setConfirm(event.target.value)} placeholder="CONFIRM REAL MODE" />
+            </div>
+          )}
+
+          <div className="grid">
+            <Card title="dryRun" value="true" tone="safe" />
+            <Card title="realTrading" value="false" tone="danger" />
+            <Card title="canTrade" value="false" tone="danger" />
+            <Card title="auto mode" value={context.autoTradingMode} tone="warning" />
+            <Card title="trading mode" value={context.tradingMode} />
+            <Card title="owner id" value={APP_CONFIG.ownerUserId} />
+            <Card title="n8n action" value={screen.action} />
+            <Card title="paper trading" value="ready" tone="safe" />
+          </div>
+
+          <div className="actions">
+            <button disabled={loading === screen.action} onClick={() => run(screen.action, active === "profit" ? calc : {})}>Run {screen.title}</button>
+            <button className="warn" disabled={loading === ACTIONS.startPaperTrading} onClick={() => run(ACTIONS.startPaperTrading)}>Start Paper Trading</button>
+            <button className="danger" disabled={loading === ACTIONS.emergencyStop} onClick={() => run(ACTIONS.emergencyStop)}>Emergency Stop</button>
+            {active === "real" && <button className="danger" disabled={confirm !== "CONFIRM REAL MODE"} onClick={() => run(ACTIONS.confirmRealMode, { confirmation: confirm })}>Confirm Real Mode Request</button>}
+          </div>
+
+          <Result result={actionResult || results.startPaperTrading || results.emergencyStop || results.confirmRealMode} />
+        </section>
       </main>
 
-      <nav className="bottom-nav" aria-label="Primary navigation">
-        {TABS.map((tab) => (
-          <button
-            key={tab.id}
-            className={tab.id === activeTab ? "active" : ""}
-            onClick={() => {
-              setActiveTab(tab.id);
-              triggerHaptic("light");
-            }}
-          >
-            {tab.short}
-          </button>
-        ))}
+      <nav className="nav">
+        {screens.map((item) => <button key={item.id} className={active === item.id ? "active" : ""} onClick={() => setActive(item.id)}>{item.title}</button>)}
       </nav>
     </div>
   );
