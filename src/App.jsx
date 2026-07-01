@@ -1,16 +1,6 @@
 import { useMemo, useState } from "react";
 import { actionLabel, apiAction } from "./api.js";
-import {
-  ACTIONS,
-  APP_CONFIG,
-  AUTO_TRADING_MODES,
-  CONFIG_ERROR,
-  SAFETY_PAYLOAD,
-  SYMBOLS,
-  THEMES,
-  TIMEFRAMES,
-  TRADING_MODES
-} from "./config.js";
+import { ACTIONS, APP_CONFIG, AUTO_TRADING_MODES, CONFIG_ERROR, SAFETY_PAYLOAD, SYMBOLS, THEMES, TIMEFRAMES, TRADING_MODES } from "./config.js";
 import { initTelegram, notifyHaptic, triggerHaptic } from "./telegram.js";
 
 const screens = [
@@ -52,25 +42,15 @@ const riskRules = [
   ["weekendProtection", "true"]
 ];
 
-const quality = ["trend", "RSI", "MACD", "EMA", "volume", "volatility", "spread", "news risk", "liquidity"];
-
-const text = (value, fallback = "Waiting") => {
-  if (value === null || value === undefined || value === "") return fallback;
-  if (typeof value === "boolean") return value ? "true" : "false";
-  return String(value);
-};
+const signalQuality = ["trend", "RSI", "MACD", "EMA", "volume", "volatility", "spread", "news risk", "liquidity"];
+const text = (value, fallback = "нет данных от backend") => value === null || value === undefined || value === "" ? fallback : String(value);
 
 function Pill({ children, tone = "safe" }) {
   return <span className={`pill ${tone}`}>{children}</span>;
 }
 
 function Card({ title, value, tone = "neutral" }) {
-  return (
-    <article className={`card ${tone}`}>
-      <span>{title}</span>
-      <strong>{text(value)}</strong>
-    </article>
-  );
+  return <article className={`card ${tone}`}><span>{title}</span><strong>{text(value)}</strong></article>;
 }
 
 function SelectField({ label, value, options, onChange }) {
@@ -79,9 +59,9 @@ function SelectField({ label, value, options, onChange }) {
       <span>{label}</span>
       <select value={value} onChange={(event) => onChange(event.target.value)}>
         {options.map((item) => {
-          const value = typeof item === "string" ? item : item.symbol;
-          const label = typeof item === "string" ? item : `${item.symbol} - ${item.label}`;
-          return <option key={value} value={value}>{label}</option>;
+          const optionValue = typeof item === "string" ? item : item.symbol;
+          const optionLabel = typeof item === "string" ? item : `${item.symbol} - ${item.label}`;
+          return <option key={optionValue} value={optionValue}>{optionLabel}</option>;
         })}
       </select>
     </label>
@@ -92,7 +72,7 @@ function Result({ result }) {
   if (!result) return null;
   return (
     <article className={`result ${result.ok ? "ok" : "bad"}`}>
-      <strong>{result.ok ? `n8n: ${actionLabel(result.action)}` : "n8n недоступен / backend не подключён"}</strong>
+      <strong>{result.ok ? `n8n: ${actionLabel(result.action)}` : "n8n backend недоступен"}</strong>
       <pre>{JSON.stringify(result.ok ? result.data : { error: result.error }, null, 2)}</pre>
     </article>
   );
@@ -113,13 +93,16 @@ export default function App() {
     autoTradingMode: APP_CONFIG.defaults.autoTradingMode,
     theme: APP_CONFIG.defaults.theme
   });
-  const [calc, setCalc] = useState({ deposit: 1000, risk: 1, trades: 2, winRate: 60, rr: 1.5 });
+  const [calc, setCalc] = useState({ deposit: "", risk: "", trades: "", winRate: "", rr: "" });
 
   const screen = screens.find((item) => item.id === active) || screens[0];
   const symbol = useMemo(() => SYMBOLS.find((item) => item.symbol === context.selectedSymbol) || SYMBOLS[0], [context.selectedSymbol]);
-  const latest = results.getSignal?.data || {};
-  const calcRisk = Number(calc.deposit) * (Number(calc.risk) / 100);
-  const calcAverage = ((Number(calc.trades) * Number(calc.winRate) / 100) * calcRisk * Number(calc.rr)) - ((Number(calc.trades) * (100 - Number(calc.winRate)) / 100) * calcRisk);
+  const latest = results.getSignal?.ok ? results.getSignal.data : null;
+  const backendChecked = Object.values(results).some(Boolean);
+  const backendOnline = Object.values(results).some((result) => result?.ok);
+  const mt5Connected = Boolean(results.status?.data?.mt5Connected || results.diagnostics?.data?.mt5Connected);
+  const binanceConnected = Boolean(results.status?.data?.binanceConnected || results.diagnostics?.data?.binanceConnected);
+  const actionResult = results[actionLabel(screen.action)] || results[screen.action];
 
   const patchContext = (patch) => setContext((current) => ({ ...current, ...patch }));
   const selectSymbol = (nextSymbol) => {
@@ -143,16 +126,11 @@ export default function App() {
     notifyHaptic(result.ok ? "success" : "error");
   };
 
-  const actionResult = results[actionLabel(screen.action)] || results[screen.action];
-
   return (
     <div className={`app theme-${context.theme.toLowerCase().replaceAll(" ", "-")}`}>
       <header className="top">
-        <div>
-          <span className="eyebrow">Telegram Mini App • {telegram.isTelegram ? "Telegram" : "Preview"}</span>
-          <h1>{APP_CONFIG.appName}</h1>
-        </div>
-        <Pill tone="gold">{context.theme}</Pill>
+        <div><span className="eyebrow">Telegram Mini App • {telegram.isTelegram ? "Telegram" : "Preview"}</span><h1>{APP_CONFIG.appName}</h1></div>
+        <Pill tone="gold">Production</Pill>
       </header>
 
       {telegram.warning && <div className="banner warn">{telegram.warning}</div>}
@@ -160,87 +138,51 @@ export default function App() {
 
       <main className="main">
         <section className="hero">
-          <div>
-            <span>{symbol.label}</span>
-            <h2>{context.selectedSymbol}</h2>
-            <p>{context.selectedProvider.toUpperCase()} • {context.selectedMarket} • {context.selectedTimeframe}</p>
-          </div>
+          <div><span>{symbol.label}</span><h2>{context.selectedSymbol}</h2><p>{context.selectedProvider.toUpperCase()} • {context.selectedMarket} • {context.selectedTimeframe}</p></div>
           <Pill tone="gold">Real orders blocked</Pill>
         </section>
 
         <section className="panel">
           <h2>{screen.title}</h2>
-
           <div className="selectors">
             <SelectField label="Symbol" value={context.selectedSymbol} options={SYMBOLS} onChange={selectSymbol} />
             <SelectField label="Timeframe" value={context.selectedTimeframe} options={TIMEFRAMES} onChange={(value) => patchContext({ selectedTimeframe: value })} />
             <SelectField label="Theme" value={context.theme} options={THEMES} onChange={(value) => patchContext({ theme: value })} />
           </div>
 
-          {active === "modes" && (
-            <div className="chips">
-              {TRADING_MODES.map((mode) => <button key={mode} className={context.tradingMode === mode ? "active" : ""} onClick={() => patchContext({ tradingMode: mode })}>{mode}</button>)}
-            </div>
-          )}
-
-          {active === "auto" && (
-            <div className="chips">
-              {AUTO_TRADING_MODES.map((mode) => <button key={mode} className={context.autoTradingMode === mode ? "active" : ""} onClick={() => patchContext({ autoTradingMode: mode })}>{mode}</button>)}
-            </div>
-          )}
-
-          {active === "market" && (
-            <div className="symbols">
-              {SYMBOLS.map((item) => <button key={item.symbol} className={item.symbol === context.selectedSymbol ? "active" : ""} onClick={() => selectSymbol(item.symbol)}><strong>{item.symbol}</strong><span>{item.market}</span></button>)}
-            </div>
-          )}
+          {active === "modes" && <div className="chips">{TRADING_MODES.map((mode) => <button key={mode} className={context.tradingMode === mode ? "active" : ""} onClick={() => patchContext({ tradingMode: mode })}>{mode}</button>)}</div>}
+          {active === "auto" && <div className="chips">{AUTO_TRADING_MODES.map((mode) => <button key={mode} className={context.autoTradingMode === mode ? "active" : ""} onClick={() => patchContext({ autoTradingMode: mode })}>{mode}</button>)}</div>}
+          {active === "market" && <div className="symbols">{SYMBOLS.map((item) => <button key={item.symbol} className={item.symbol === context.selectedSymbol ? "active" : ""} onClick={() => selectSymbol(item.symbol)}><strong>{item.symbol}</strong><span>{item.market}</span></button>)}</div>}
 
           {active === "signals" && (
             <>
               <div className="signal">
-                <div><span>{text(latest.symbol, context.selectedSymbol)}</span><h3>{text(latest.direction || latest.signal, "WAIT")}</h3><p>{text(latest.explanation || latest.reason, "No fake signal. Request n8n analysis.")}</p></div>
-                <Pill tone="gold">{text(latest.confidence, 0)}% confidence</Pill>
+                <div><span>{context.selectedSymbol}</span><h3>{text(latest?.direction || latest?.signal)}</h3><p>{text(latest?.explanation || latest?.reason, "Сигнал не создан. Нужен реальный ответ n8n backend.")}</p></div>
+                <Pill tone="gold">{latest?.confidence ? `${latest.confidence}% confidence` : "backend required"}</Pill>
               </div>
-              <div className="scores">
-                {quality.map((name, index) => <Card key={name} title={`${name} score`} value={`${72 + index}%`} />)}
-              </div>
+              <div className="scores">{signalQuality.map((name) => <Card key={name} title={`${name} score`} value="нет данных от backend" />)}</div>
             </>
           )}
 
           {active === "risk" && <div className="grid">{riskRules.map(([key, value]) => <Card key={key} title={key} value={value} />)}</div>}
-
           {active === "profit" && (
             <>
-              <div className="selectors">
-                {Object.keys(calc).map((key) => <label className="field" key={key}><span>{key}</span><input type="number" value={calc[key]} onChange={(event) => setCalc((current) => ({ ...current, [key]: event.target.value }))} /></label>)}
-              </div>
-              <div className="grid">
-                <Card title="Best scenario" value={(calcAverage * 1.4).toFixed(2)} tone="safe" />
-                <Card title="Average scenario" value={calcAverage.toFixed(2)} />
-                <Card title="Possible loss" value={(-Math.abs(calcRisk * 3)).toFixed(2)} tone="danger" />
-                <Card title="Max drawdown" value={(calcRisk * 3).toFixed(2)} tone="warning" />
-              </div>
-              <p className="notice">Расчёт является примерным и не является гарантией прибыли.</p>
+              <div className="selectors">{Object.keys(calc).map((key) => <label className="field" key={key}><span>{key}</span><input type="number" value={calc[key]} onChange={(event) => setCalc((current) => ({ ...current, [key]: event.target.value }))} /></label>)}</div>
+              <div className="grid"><Card title="Profit result" value="только после ответа n8n" /><Card title="Loss result" value="только после ответа n8n" tone="danger" /><Card title="Drawdown" value="только после ответа n8n" tone="warning" /><Card title="Guarantee" value="нет гарантии прибыли" /></div>
+              <p className="notice">Расчёт является примерным и не является гарантией прибыли. Фронтенд не создаёт фейковую прибыль.</p>
             </>
           )}
-
-          {active === "real" && (
-            <div className="danger-box">
-              <strong>Real trading requires backend and owner confirmation.</strong>
-              <span>Frontend will only call request/confirm actions; it never enables realTrading.</span>
-              <input value={confirm} onChange={(event) => setConfirm(event.target.value)} placeholder="CONFIRM REAL MODE" />
-            </div>
-          )}
+          {active === "real" && <div className="danger-box"><strong>Real Trading заблокирован по умолчанию.</strong><span>Фронтенд только отправляет request/confirm actions в n8n и сам не включает realTrading.</span><input value={confirm} onChange={(event) => setConfirm(event.target.value)} placeholder="CONFIRM REAL MODE" /></div>}
 
           <div className="grid">
+            <Card title="n8n backend" value={backendChecked ? (backendOnline ? "ответ получен" : "n8n backend недоступен") : "не проверен"} tone={backendOnline ? "safe" : "danger"} />
+            <Card title="MT5 provider" value={mt5Connected ? "подключён" : "MT5 provider не подключён. XAUUSD/Forex сигналы недоступны."} tone={mt5Connected ? "safe" : "danger"} />
+            <Card title="Binance credentials" value={binanceConnected ? "подключены" : "Binance credentials не подключены. Crypto/USDT пары недоступны."} tone={binanceConnected ? "safe" : "danger"} />
             <Card title="dryRun" value="true" tone="safe" />
             <Card title="realTrading" value="false" tone="danger" />
             <Card title="canTrade" value="false" tone="danger" />
-            <Card title="auto mode" value={context.autoTradingMode} tone="warning" />
-            <Card title="trading mode" value={context.tradingMode} />
-            <Card title="owner id" value={APP_CONFIG.ownerUserId} />
+            <Card title="paper trading" value="safe mode, requires n8n response" tone="safe" />
             <Card title="n8n action" value={screen.action} />
-            <Card title="paper trading" value="ready" tone="safe" />
           </div>
 
           <div className="actions">
@@ -249,14 +191,11 @@ export default function App() {
             <button className="danger" disabled={loading === ACTIONS.emergencyStop} onClick={() => run(ACTIONS.emergencyStop)}>Emergency Stop</button>
             {active === "real" && <button className="danger" disabled={confirm !== "CONFIRM REAL MODE"} onClick={() => run(ACTIONS.confirmRealMode, { confirmation: confirm })}>Confirm Real Mode Request</button>}
           </div>
-
           <Result result={actionResult || results.startPaperTrading || results.emergencyStop || results.confirmRealMode} />
         </section>
       </main>
 
-      <nav className="nav">
-        {screens.map((item) => <button key={item.id} className={active === item.id ? "active" : ""} onClick={() => setActive(item.id)}>{item.title}</button>)}
-      </nav>
+      <nav className="nav">{screens.map((item) => <button key={item.id} className={active === item.id ? "active" : ""} onClick={() => setActive(item.id)}>{item.title}</button>)}</nav>
     </div>
   );
 }
