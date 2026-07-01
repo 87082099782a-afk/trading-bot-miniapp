@@ -41,16 +41,12 @@ export const apiAction = async (action, user, context, extraPayload = {}, timeou
 
     const data = await parseResponse(response);
     if (!response.ok) {
-      throw new Error(data?.message || data?.error || `n8n request failed with ${response.status}`);
+      throw new Error("n8n backend недоступен");
     }
 
     return { ok: true, action, data, safety: SAFETY_PAYLOAD };
   } catch (error) {
-    const message =
-      error?.name === "AbortError"
-        ? "n8n недоступен / backend не подключён: request timed out."
-        : error?.message || "n8n недоступен / backend не подключён.";
-
+    const message = error?.name === "AbortError" ? "n8n backend недоступен" : error?.message || "n8n backend недоступен";
     return { ok: false, action, error: message, data: null, safety: SAFETY_PAYLOAD };
   } finally {
     window.clearTimeout(timeout);
