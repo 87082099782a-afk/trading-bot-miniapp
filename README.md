@@ -1,38 +1,83 @@
 # Trading Bot Control Panel
 
-Telegram Mini App control panel for a Binance trading bot managed through n8n webhooks.
+Production Telegram Mini App for trading-bot control through n8n.
+
+GitHub Pages URL:
+
+```text
+https://87082099782a-afk.github.io/trading-bot-miniapp/
+```
+
+Telegram bot:
+
+```text
+https://t.me/Bossst11as_bot
+```
 
 ## Safety Defaults
 
-- Real trading is blocked in the frontend.
-- Every n8n payload forces `dryRun: true`.
-- Every n8n payload forces `realTrading: false`.
-- Every n8n payload forces `canTrade: false`.
-- Binance, Telegram, OpenAI, and Perplexity keys must stay only in n8n credentials.
-- The frontend uses only the n8n webhook base URL from environment variables.
+- `dryRun: true`
+- `realTrading: false`
+- `canTrade: false`
+- frontend never enables real trading by itself
+- real orders are blocked in UI and request payload
+- Telegram token, Binance secret, OpenAI key, MT5 password, and provider API keys are not stored in code
 
-## Local Install
+## Frontend Defaults
+
+- `selectedSymbol = XAUUSD`
+- `selectedProvider = mt5`
+- `selectedMarket = metals`
+- `selectedTimeframe = 15m`
+- default trading mode: `Balanced`
+- default auto mode: `ANALYSIS_ONLY`
+
+## n8n API
+
+All frontend actions call:
+
+```text
+POST https://almaz2607kz.app.n8n.cloud/webhook/telegram-miniapp/action
+```
+
+Every payload includes:
+
+```json
+{
+  "dryRun": true,
+  "realTrading": false,
+  "canTrade": false
+}
+```
+
+The frontend sends an `action` field such as `status`, `get_signal`, `get_opportunity_radar`, `start_paper_trading`, `diagnostics`, or `self_repair`.
+
+## Local Development
 
 ```bash
 npm install
-```
-
-## Run Locally
-
-```bash
-cp .env.example .env
 npm run dev
 ```
 
-Open the local Vite URL. Outside Telegram, the app uses a demo fallback user and shows:
+## Build
 
-```text
-Открыто вне Telegram. Доступен только preview режим.
+```bash
+npm run build
 ```
 
-## Environment Variables
+## GitHub Pages Deploy
 
-The GitHub Pages workflow injects these build variables automatically:
+Deployment is handled by `.github/workflows/deploy.yml`.
+
+On push to `main`, GitHub Actions:
+
+1. Installs dependencies with `npm install`.
+2. Builds with `npm run build`.
+3. Uploads `dist` as a Pages artifact.
+4. Deploys to GitHub Pages.
+5. If repository secret `TELEGRAM_BOT_TOKEN` exists, configures the Telegram Menu Button and bot commands.
+
+Required Vite build env is defined inside the workflow:
 
 ```env
 VITE_APP_NAME=Trading Bot Control
@@ -41,55 +86,11 @@ VITE_ALLOWED_USER_ID=8300266144
 VITE_REQUEST_TIMEOUT_MS=20000
 ```
 
-`VITE_N8N_WEBHOOK_BASE_URL` is required. If it is missing, the app renders a clear configuration error instead of crashing.
+## Credentials Still Needed
 
-## Build
+Configure these only in n8n credentials or safe environment secrets:
 
-```bash
-npm run build
-```
-
-## Deploy to GitHub Pages
-
-Deployment is handled by `.github/workflows/deploy.yml`.
-
-On every push to `main`, GitHub Actions will:
-
-1. Install dependencies with `npm install`.
-2. Build the Vite app with `npm run build`.
-3. Upload `dist` as a GitHub Pages artifact.
-4. Deploy the artifact to GitHub Pages.
-
-The production URL is:
-
-```text
-https://87082099782a-afk.github.io/trading-bot-miniapp/
-```
-
-The Vite config uses:
-
-```js
-base: "/trading-bot-miniapp/"
-```
-
-## BotFather Setup
-
-After the GitHub Pages workflow succeeds, use this URL as the Telegram Web App/Menu Button URL in BotFather:
-
-```text
-https://87082099782a-afk.github.io/trading-bot-miniapp/
-```
-
-## n8n Start Button
-
-In the n8n `/start` workflow response, use the same GitHub Pages URL for the Telegram Web App button. Keep all exchange and AI provider secrets in n8n credentials.
-
-## Real Mode
-
-The Real Mode screen only sends a confirmation request to:
-
-```text
-POST /telegram-miniapp/confirm-real-mode
-```
-
-The frontend never enables real trading by itself. Real orders remain blocked by UI state and by every request payload.
+- MT5 credentials
+- Binance credentials
+- AI provider keys
+- Telegram bot token as GitHub secret `TELEGRAM_BOT_TOKEN` if automatic menu setup is desired
