@@ -1,11 +1,8 @@
-import { getEndpointUrl, SAFETY_PAYLOAD } from "./config.js";
+import { ACTIONS, getActionUrl, SAFETY_PAYLOAD } from "./config.js";
 
 const parseResponse = async (response) => {
   const text = await response.text();
-
-  if (!text) {
-    return {};
-  }
+  if (!text) return {};
 
   try {
     return JSON.parse(text);
@@ -14,52 +11,51 @@ const parseResponse = async (response) => {
   }
 };
 
-const buildPayload = (user, extraPayload = {}) => ({
-  ...extraPayload,
+export const buildSafePayload = (action, user, context, extraPayload = {}) => ({
+  action,
   telegramUserId: user?.id || "preview-user",
   userId: user?.id || "preview-user",
   username: user?.username || "",
   firstName: user?.firstName || "",
+  selectedSymbol: context.selectedSymbol,
+  selectedProvider: context.selectedProvider,
+  selectedMarket: context.selectedMarket,
+  selectedTimeframe: context.selectedTimeframe,
+  tradingMode: context.tradingMode,
+  autoTradingMode: context.autoTradingMode,
+  ...extraPayload,
   ...SAFETY_PAYLOAD
 });
 
-export const apiCall = async (endpoint, user, extraPayload = {}, timeoutMs = 20000) => {
+export const apiAction = async (action, user, context, extraPayload = {}, timeoutMs = 20000) => {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await fetch(getEndpointUrl(endpoint), {
+    const response = await fetch(getActionUrl(), {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(buildPayload(user, extraPayload)),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildSafePayload(action, user, context, extraPayload)),
       signal: controller.signal
     });
 
     const data = await parseResponse(response);
-
     if (!response.ok) {
-      throw new Error(data?.message || data?.error || `Request failed with ${response.status}`);
+      throw new Error(data?.message || data?.error || `n8n request failed with ${response.status}`);
     }
 
-    return {
-      ok: true,
-      data,
-      safety: SAFETY_PAYLOAD
-    };
+    return { ok: true, action, data, safety: SAFETY_PAYLOAD };
   } catch (error) {
     const message =
       error?.name === "AbortError"
-        ? "Request timed out. Check the n8n webhook and network connection."
-        : error?.message || "Unknown request error.";
+        ? "n8n недоступен / backend не подключён: request timed out."
+        : error?.message || "n8n недоступен / backend не подключён.";
 
-    return {
-      ok: false,
-      error: message,
-      safety: SAFETY_PAYLOAD
-    };
+    return { ok: false, action, error: message, data: null, safety: SAFETY_PAYLOAD };
   } finally {
     window.clearTimeout(timeout);
   }
 };
+
+export const actionLabel = (action) =>
+  Object.entries(ACTIONS).find(([, value]) => value === action)?.[0] || action;
