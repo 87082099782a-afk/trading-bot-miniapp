@@ -90,12 +90,12 @@ jobs:
           })
           post("setMyCommands", {
               "commands": json.dumps([
-                  {"command": "start", "description": "Запустить панель"},
-                  {"command": "status", "description": "Статус бота"},
-                  {"command": "signals", "description": "Сигналы"},
-                  {"command": "stop", "description": "Остановить"},
+                  {"command": "start", "description": "Open control panel"},
+                  {"command": "status", "description": "Bot status"},
+                  {"command": "signals", "description": "Trading signals"},
+                  {"command": "stop", "description": "Stop bot"},
                   {"command": "emergency", "description": "Emergency Stop"},
-                  {"command": "help", "description": "Помощь"}
+                  {"command": "help", "description": "Help"}
               ])
           })
           PY
