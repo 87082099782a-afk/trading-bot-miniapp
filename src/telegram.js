@@ -1,24 +1,18 @@
+export const PREVIEW_WARNING = "Открыто вне Telegram. Доступен preview режим без реальных сделок.";
+
 const FALLBACK_USER = {
   id: "preview-user",
   username: "preview",
   firstName: "Preview"
 };
 
-export const PREVIEW_WARNING = "Открыто вне Telegram. Доступен только preview режим.";
-
-const getWebApp = () => {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  return window.Telegram?.WebApp || null;
-};
+const getWebApp = () => (typeof window === "undefined" ? null : window.Telegram?.WebApp || null);
 
 const safeCall = (callback) => {
   try {
     callback?.();
   } catch {
-    // Telegram methods can throw in browser preview mode.
+    // Telegram methods can throw outside the Telegram client.
   }
 };
 
@@ -32,36 +26,26 @@ export const initTelegram = () => {
     safeCall(() => webApp.expand());
   }
 
-  const user = isTelegram
-    ? {
-        id: String(telegramUser.id),
-        username: telegramUser.username || "",
-        firstName: telegramUser.first_name || telegramUser.firstName || ""
-      }
-    : FALLBACK_USER;
-
   return {
     webApp,
     isTelegram,
     warning: isTelegram ? "" : PREVIEW_WARNING,
-    user
+    user: isTelegram
+      ? {
+          id: String(telegramUser.id),
+          username: telegramUser.username || "",
+          firstName: telegramUser.first_name || telegramUser.firstName || ""
+        }
+      : FALLBACK_USER
   };
 };
 
 export const triggerHaptic = (type = "light") => {
-  const webApp = getWebApp();
-  const impact = webApp?.HapticFeedback?.impactOccurred;
-
-  if (typeof impact === "function") {
-    safeCall(() => impact(type));
-  }
+  const impact = getWebApp()?.HapticFeedback?.impactOccurred;
+  if (typeof impact === "function") safeCall(() => impact(type));
 };
 
 export const notifyHaptic = (type = "success") => {
-  const webApp = getWebApp();
-  const notification = webApp?.HapticFeedback?.notificationOccurred;
-
-  if (typeof notification === "function") {
-    safeCall(() => notification(type));
-  }
+  const notification = getWebApp()?.HapticFeedback?.notificationOccurred;
+  if (typeof notification === "function") safeCall(() => notification(type));
 };
