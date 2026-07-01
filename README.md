@@ -11,7 +11,7 @@ Telegram Mini App control panel for a Binance trading bot managed through n8n we
 - Binance, Telegram, OpenAI, and Perplexity keys must stay only in n8n credentials.
 - The frontend uses only the n8n webhook base URL from environment variables.
 
-## Install
+## Local Install
 
 ```bash
 npm install
@@ -32,7 +32,7 @@ Open the local Vite URL. Outside Telegram, the app uses a demo fallback user and
 
 ## Environment Variables
 
-Create `.env` locally and add the same variables in Vercel:
+The GitHub Pages workflow injects these build variables automatically:
 
 ```env
 VITE_APP_NAME=Trading Bot Control
@@ -49,30 +49,40 @@ VITE_REQUEST_TIMEOUT_MS=20000
 npm run build
 ```
 
-## Deploy to Vercel
+## Deploy to GitHub Pages
 
-1. Import the GitHub repository into Vercel.
-2. Add the environment variables listed above.
-3. Use the default Vite build settings:
-   - Build command: `npm run build`
-   - Output directory: `dist`
-4. Deploy.
+Deployment is handled by `.github/workflows/deploy.yml`.
 
-`vercel.json` includes an SPA fallback so Telegram deep links load the app correctly.
+On every push to `main`, GitHub Actions will:
+
+1. Install dependencies with `npm install`.
+2. Build the Vite app with `npm run build`.
+3. Upload `dist` as a GitHub Pages artifact.
+4. Deploy the artifact to GitHub Pages.
+
+The production URL is:
+
+```text
+https://87082099782a-afk.github.io/trading-bot-miniapp/
+```
+
+The Vite config uses:
+
+```js
+base: "/trading-bot-miniapp/"
+```
 
 ## BotFather Setup
 
-After Vercel deploys, copy the production URL, for example:
+After the GitHub Pages workflow succeeds, use this URL as the Telegram Web App/Menu Button URL in BotFather:
 
 ```text
-https://your-project.vercel.app
+https://87082099782a-afk.github.io/trading-bot-miniapp/
 ```
-
-In BotFather, configure the bot Web App/Menu Button URL with that Vercel URL.
 
 ## n8n Start Button
 
-In the n8n `/start` workflow response, use the same Vercel URL for the Telegram Web App button. Keep all exchange and AI provider secrets in n8n credentials.
+In the n8n `/start` workflow response, use the same GitHub Pages URL for the Telegram Web App button. Keep all exchange and AI provider secrets in n8n credentials.
 
 ## Real Mode
 
